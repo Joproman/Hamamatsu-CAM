@@ -1,0 +1,49 @@
+<html>
+    <head>
+        <title>Change region of interest</title>
+        <style>
+            .img-container {
+                text-align: center;
+                display: block;
+            }
+            #myCanvas {
+                margin: auto;
+                display: block;
+            }
+            h3 {text-align: center}
+            canvas {display: inline}
+            form {text-align: center}
+            div {
+                text-align: center;
+            }
+            p {text-align: center}
+        </style>
+        <script>
+            window.onresize = function(){ location.reload(); }
+        </script>
+        <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+    </head>
+    <body>
+        <h3>Change region of interest</h3>
+        <p>Click on the TOP-LEFT and BOTTOM-RIGHT coordinates of the new region of interest.</p>
+        <span style="display: none;">
+            <img id='my_img' src="{{ url_for('capture') }}" width="700" height="700" alt="Streaming">
+        </span>
+        <canvas id="myCanvas" class="img-container" width="700" height="700">
+        <script>
+            window.onload = function() {
+              var c = document.getElementById("myCanvas");
+              var ctx = c.getContext("2d");
+              var img = document.getElementById("my_img");
+              ctx.drawImage(img, 0, 0, 700, 700);
+            };
+        </script>
+        </canvas>
+        <br>
+        <form action="/">
+            <input type="submit" value="Return" />
+        </form>
+        <div id="mouse_coord"></div>
+        <script type="text/javascript" src="{{ url_for('static', filename='setROI.js')}}"></script>
+    </body>
+</html>

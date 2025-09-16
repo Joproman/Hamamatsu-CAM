@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "hamamatsu-camera"
+version = "0.1.0"
+description = "Hamamtsu camera interface that analyses the number and position of the ions."
+authors = ["Philip Leindecker <pleindecker@ethz.ch>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = " >=3.9,<3.12"
+numpy = "^1.24.3"
+hamamatsu = {git = "https://github.com/tiagocoutinho/hamamatsu.git"}
+tiqi-ion-trap-image-analysis = {path = "deps/tiqi-ion-trap-image-analysis", develop = true}
+opencv-python = "^4.7.0.72"
+scipy = "^1.8.1"
+flask = "^2.3.2"
+influxdb = "^5.3.1"
+pandas = "^2.0.2"
+sklearn = "^0.0.post5"
+scikit-learn = "^1.2.2"
+influxdb-client = "^1.36.1"
+scikit-image = "^0.20.0"
+sympy = "^1.12"
+pyzmq = "^25.1.0"
+gevent = "^22.10.2"
+semaphore-win-ctypes = "^0.1.2"
+matplotlib = "^3.7.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

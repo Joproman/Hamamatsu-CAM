@@ -1,0 +1,97 @@
+<html>
+    <head>
+        <title>Ion detection</title>
+        <link rel="shortcut icon" href="#">
+        <link rel= "stylesheet" type= "text/css" href= "{{ url_for('static',filename='styles/mystyle.css') }}">
+        <style>
+            .img-container {
+                display: block;
+                text-align: center;
+            }
+            h1 {text-align: center}
+            h2 {text-align: center}
+            h3 {text-align: center}
+            div {text-align: center}
+            form {display: inline}
+
+        </style>
+        <script type="text/javascript" src="{{ url_for('static', filename='getText.js') }}"></script>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/css/bootstrap.min.css">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js" integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh" crossorigin="anonymous"></script>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/js/bootstrap.min.js"></script>
+        <link href="https://gitcdn.github.io/bootstrap-toggle/2.2.2/css/bootstrap-toggle.min.css" rel="stylesheet">
+        <script src="https://gitcdn.github.io/bootstrap-toggle/2.2.2/js/bootstrap-toggle.min.js"></script>
+        <script type="text/javascript" src="{{ url_for('static', filename='rotate.js') }}"></script>
+        <script type="text/javascript" src="{{ url_for('static', filename='toggle.js') }}"></script>
+    </head>
+    <body>
+        <h1 style="font-size: 45px">Ion detection</h1>
+        <div>
+            <p style="font-size: 23px">Number of ions in the trap: <span id="bright_ions" style="color: red"></span> bright ions, <span id="dim_ions" style="color: red"></span> dim ions, <span id="dark_ions" style="color: red"></span> dark ions</p>
+            <p style="font-size: 23px">Intensity of brightest ion: <span id="max_int" style="color: red"></span> summed over <span id="num_pixels" style="color: red"></span> pixels.</p>
+            <p style="font-size: 23px">Reorder moving avg: <span id="reorder_avg" style="color: red"></span>/minute</p>
+            <p style="font-size: 23px">Linearity: <span id="linearity" style="color: red"></span></p>
+            <p style="font-size: 23px">Max spot size: <span id="max_spot_size" style="color: red"></span></p>
+            <p style="font-size: 23px">Ion roundness: <span id="roundness" style="color: red"></span>%</p>
+            <p style="font-size: 23px">Fit error: <span id="fit_error" style="color: red"></span> (Moving avg: <span id="fit_avg" style="color: red"></span>) <span id="response" style="color: red"></span></p>
+            <p style="font-size: 23px"> Camera status: <span class="status" style="display:none;">{{data.status}}</span>
+                <label class="switch">
+                    <input type="checkbox" class="toggle" onclick="change_status('.status', 'cam')" checked>
+                    <span class="slider round"></span>
+                </label>
+            </p>
+            <script>
+                if ($('.status').text() === 'OFF') {
+                    $('.toggle').prop("checked", false);
+                }
+            </script>
+            <p style="font-size: 23px"> Ion detection status: <span class="ionStatus" style="display:none;">{{data.ionStatus}}</span>
+                <label class="switch">
+                    <input type="checkbox" class="ionToggle" onclick="change_status('.ionStatus', 'ion')" checked>
+                    <span class="slider round"></span>
+                </label>
+            </p>
+            <script>
+                if ($('.ionStatus').text() === 'OFF') {
+                    $('.ionToggle').prop("checked", false);
+                }
+            </script>
+            <div>
+                <iframe name="votar" style="display:none;"></iframe>
+                <div style="font-size: 23px" class="expTime">
+                    <span style="display: none;">{{ data.expTime }}</span>
+                    Exposure time (s):
+                    <form target="votar">
+                        <input type="number" class="newExpTime" placeholder={{ data.expTime }} style="width:100px" step="0.1" value={{ data.expTime }}>
+                        <button type="button" class="exp-click" onclick="changeExpTime('.exp-click')">Update</button>
+                    </form>
+                </div>
+            </div>
+            <script type="text/javascript" src="{{ url_for('static', filename='exptime.js') }}"></script>
+        </div>
+
+        <h2 style="font-size: 35px">Stream:</h2>
+        <span class="img-container">
+            <img src="{{ url_for('video_feed_roi') }}" alt="Streaming" width="auto" height="350" style="max-width: 1500px">
+            <p style="font-size: 25px"><a href="/stream">Click here to see in full screen</a></p>
+        </span>
+        <div>
+            <span style="display: none;" class="rotationAngle">{{ data.angle }}</span>
+            <input type="button" value="Rotate image ({{ data.angle }})" id="rotateButton" onclick="rotate('.rotate')" />
+            <form action="/ROI">
+                <input type="submit" value="Change ROI" />
+            </form>
+        </div>
+        <br>
+        <div>
+            <form action="/hist">
+                <input type="submit" value="Tweak histogram" />
+            </form>
+            <form action="/cross_hair">
+                <input type="submit" value="Edit cross hairs" />
+            </form>
+        </div>
+    <br>
+    </body>
+</html>

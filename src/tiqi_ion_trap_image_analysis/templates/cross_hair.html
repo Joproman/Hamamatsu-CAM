@@ -1,0 +1,60 @@
+<html>
+    <head>
+        <title>Edit cross hairs</title>
+        <style>
+            h3 {text-align: center}
+            form {text-align: center}
+            li {
+                text-align: center;
+            }
+            p {text-align: center}
+        </style>
+        <script>
+            window.onresize = function(){ location.reload(); }
+        </script>
+        <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+    </head>
+    <body>
+        <h3>Edit cross hairs</h3>
+        <p>Click on the image to add a cross hair.</p>
+        <div class="wrapper" style="margin: 0 auto; width: 1200px; position: relative; justify-content: center;">
+            <span style="display: none;">
+                <img id='my_img' src="{{ url_for('capture') }}" width="700" height="700" alt="Streaming">
+            </span>
+            <canvas id="myCanvas" class="img-container" width="700" height="700">
+            <script>
+                window.onload = function() {
+                var c = document.getElementById("myCanvas");
+                var ctx = c.getContext("2d");
+                var img = document.getElementById("my_img");
+                ctx.drawImage(img, 0, 0, 700, 700);
+                };
+            </script>
+            </canvas>
+            <div id="crossHairContainer" style="display: inline-block; width: 400px; position: absolute; top: 0px; left: 750px;">
+                <p style="text-align: center;">List of cross hairs:</p>
+            </div>
+            <script>
+                let num = 0;
+                for (const ch of {{ data.ch }}) {
+                    let rgb = {{ data.color }}[num];
+                    let color = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+                    var new_row = document.createElement('p');
+                    new_row.id = "row_" + num
+                    new_row.innerHTML = `x: <input type="number" class="xvalue_${num}" placeholder=${ch[0]} style="width: 70px" value=${ch[0]}> ;
+                                        y: <input type="number" class="yvalue_${num}" placeholder=${ch[1]} style="width: 70px" value=${ch[1]}>
+                                        <button type="button" id="updateButton_${num}" onclick="onClickEvent(this)">Update</button>
+                                        <button type="button" id="deleteButton_${num}" onclick="deleteCrossHair($(this).closest('p'), ${ch[0]}, ${ch[1]})">Delete</button>
+                                        <span style="display: none;" id="color_${num}">${color}<span/>`;
+                    document.getElementById('crossHairContainer').appendChild(new_row);
+                    num += 1;
+                }
+            </script>
+        </div>
+        <br>
+        <form action="/">
+            <input type="submit" value="Return" />
+        </form>
+        <script type="text/javascript" src="{{ url_for('static', filename='setCrossHair.js')}}"></script>
+    </body>
+</html>

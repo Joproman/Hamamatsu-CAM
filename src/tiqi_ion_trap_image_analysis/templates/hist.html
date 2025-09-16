@@ -1,0 +1,42 @@
+<html>
+    <head>
+        <title>Histogram tweak</title>
+        <link rel="shortcut icon" href="#">
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+        <style>
+            .img-container {
+                display: block;
+                text-align: center;
+            }
+            h1 {text-align: center}
+            h2 {text-align: center}
+            h3 {text-align: center}
+            div {text-align: center}
+            form {display: inline}
+        </style>
+    </head>
+    <body>
+        <h2 style="font-size: 35px">Histogram:</h2>
+        <span class="img-container">
+            <img src="{{ url_for('video_feed_hist_img') }}" alt="Streaming" width="auto" height="500">
+            <img src="{{ url_for('video_feed_hist') }}" alt="Streaming" width="auto" height="500">
+        </span>
+        <div>
+            <iframe name="votar" style="display:none;"></iframe>
+            <form target="votar">
+                Min:
+                <input type="number" class="min" placeholder={{ data.min }} style="width: 130px" value={{ data.min }}>
+                Max:
+                <input type="number" class="max" placeholder={{ data.max }} style="width: 130px" value={{ data.max }} >
+                <button type="button" class="exp-click">Update</button>
+            </form>
+        </div>
+        <br>
+        <div>
+            <form action="/">
+                <input type="submit" value="Return" />
+            </form>
+        </div>
+        <script type="text/javascript" src="{{ url_for('static', filename='histogram.js') }}"></script>
+    </body>
+</html>

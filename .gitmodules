@@ -1,0 +1,4 @@
+[submodule "deps/tiqi-ion-trap-image-analysis"]
+	path = deps/tiqi-ion-trap-image-analysis
+	url = git@gitlab.phys.ethz.ch:tiqi-projects/tiqi-ion-trap-image-analysis.git
+	branch = psi
