@@ -669,20 +669,36 @@ def imageAnalysis(cam, settings):
         Create a histogram showing frequency vs photoelectrons per pixel
         Uses C15550-20UP photon number resolving capability
         """
-        # Use the dedicated photon counting function
-        photoelectron_image = calculate_photon_counts_per_pixel(image)
+        try:
+            # Use the dedicated photon counting function
+            photoelectron_image = calculate_photon_counts_per_pixel(image)
 
-        # Create histogram of photoelectron values per pixel
-        # Range adjusted for typical photon counting applications
-        max_photons = max(5, np.percentile(photoelectron_image.flatten(), 99))
-        hist, bin_edges = np.histogram(photoelectron_image.flatten(), bins=50, range=(0, max_photons))
+            # Create histogram of photoelectron values per pixel
+            # Range adjusted for typical photon counting applications
+            max_photons = max(5, np.percentile(photoelectron_image.flatten(), 99))
+            hist, bin_edges = np.histogram(photoelectron_image.flatten(), bins=50, range=(0, max_photons))
+        except Exception as e:
+            print(f"Error in photon counting: {e}")
+            # Create fallback histogram with simple ADU values
+            hist, bin_edges = np.histogram(image.flatten(), bins=50)
 
         # Create plot
-        from matplotlib.figure import Figure
-        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-        fig = Figure(figsize=(8, 6))
-        canvas = FigureCanvasAgg(fig)
+            fig = Figure(figsize=(8, 6))
+            canvas = FigureCanvasAgg(fig)
+        except ImportError:
+            # Fallback: create a simple text-based histogram placeholder
+            placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(placeholder, 'Matplotlib not available', (50, 200),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(placeholder, 'Histogram cannot be displayed', (50, 250),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            return placeholder
         ax = fig.add_subplot(111)
 
         # Plot histogram
@@ -697,12 +713,37 @@ def imageAnalysis(cam, settings):
         # Convert plot to image
         canvas.draw()
         width, height = fig.get_size_inches() * fig.get_dpi()
-        image_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
 
-        # Convert RGB to BGR for OpenCV
-        image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+        # Use the newer matplotlib API
+        try:
+            # Try the newer method first
+            buf = canvas.buffer_rgba()
+            image_array = np.asarray(buf).reshape(int(height), int(width), 4)
+            # Convert RGBA to RGB
+            image_array = image_array[:, :, :3]
+        except AttributeError:
+            # Fallback to older method if available
+            try:
+                image_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
+            except AttributeError:
+                # Use alternative method
+                buf = canvas.print_to_buffer()
+                image_array = np.frombuffer(buf[0], dtype='uint8').reshape(int(height), int(width), 4)
+                image_array = image_array[:, :, :3]
 
-        return image_bgr
+            # Convert RGB to BGR for OpenCV
+            image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+            return image_bgr
+
+        except Exception as e:
+            print(f"Error creating histogram plot: {e}")
+            # Return a simple error message image
+            error_image = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(error_image, 'Histogram Error', (200, 200),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(error_image, str(e)[:50], (50, 250),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            return error_image
 
     @app.route('/photoelectron_graph')
     def photoelectron_graph():
