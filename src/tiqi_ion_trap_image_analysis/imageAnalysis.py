@@ -644,7 +644,7 @@ def imageAnalysis(cam, settings):
         """
         Update time series data with current photoelectron counts
         """
-        global photoelectron_history
+        global photoelectron_history, roi_regions
         current_time = time.time()
 
         # Get full camera photoelectron count
@@ -702,7 +702,8 @@ def imageAnalysis(cam, settings):
         while True:
             time.sleep(1)  # Update every second
             try:
-                update_photoelectron_history()
+                if 'photoelectron_history' in globals() and 'roi_regions' in globals():
+                    update_photoelectron_history()
             except Exception as e:
                 print(f"Error updating photoelectron history: {e}")
 

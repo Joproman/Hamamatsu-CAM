@@ -587,7 +587,7 @@ def ion_linearity(points):
         linearity = 'No ions'
     else:
         _, residuals, _, _, _ = np.polyfit(x, y, deg=1, full=True)
-        if residuals < 4 or len(residuals) == 0:
+        if residuals.size == 0 or (residuals.size > 0 and residuals < 4):
             linearity = 'linear'
         else:
             linearity = 'zigzag'
@@ -882,9 +882,11 @@ def _max_coord(image, width=False):
     if len(coordinates) == 1:
         # We compute the center of mass of the binary image to get a more precise value
         _, binary = cv2.threshold(filt_image, thresh=filt_image.max() * settings.COM_THRESHOLD, maxval=255, type=cv2.THRESH_BINARY)
-        # np.save('C:\\Scratch\\test\\filt_image.npy', filt_image)
-        # np.save('C:\\Scratch\\test\\binary.npy', binary)
-        com_coord = np.array(center_of_mass(binary))
+        # Check if binary image has any non-zero values before computing center of mass
+        if np.sum(binary) > 0:
+            com_coord = np.array(center_of_mass(binary))
+        else:
+            com_coord = coordinates[0]  # Fallback to peak position
 
     elif len(coordinates) > 1:
         com_coord = coordinates[0]
