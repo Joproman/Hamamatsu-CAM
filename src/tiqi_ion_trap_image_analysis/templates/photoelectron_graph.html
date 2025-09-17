@@ -62,7 +62,17 @@
                             title: {
                                 display: true,
                                 text: 'Photoelectron Count'
-                            }
+                            },
+                            beginAtZero: false,  // Don't force zero if data doesn't start at zero
+                            ticks: {
+                                callback: function(value) {
+                                    // Format large numbers with commas
+                                    return value.toLocaleString();
+                                }
+                            },
+                            // Remove any fixed min/max so they can be set dynamically
+                            min: undefined,
+                            max: undefined
                         }
                     },
                     plugins: {
@@ -125,16 +135,45 @@
                 fetch('/photoelectron_data')
                     .then(response => response.json())
                     .then(data => {
+                        console.log('Received photoelectron data:', data);
+
                         // Update full camera chart
-                        if (data.timestamps && data.counts) {
+                        if (data.timestamps && data.counts && data.counts.length > 0) {
                             const startTime = data.timestamps[0] || 0;
                             const chartData = data.timestamps.map((timestamp, index) => ({
                                 x: timestamp - startTime,
                                 y: data.counts[index]
                             }));
 
+                            console.log('Chart data for full camera:', chartData);
+                            console.log('Y-values range:', Math.min(...data.counts), 'to', Math.max(...data.counts));
+
                             fullCameraChart.data.datasets[0].data = chartData;
+
+                            // Dynamic Y-axis scaling with improved logic
+                            if (data.counts.length > 0) {
+                                const maxCount = Math.max(...data.counts);
+                                const minCount = Math.min(...data.counts);
+                                const range = maxCount - minCount;
+                                const padding = Math.max(range * 0.1, maxCount * 0.05, 1); // Ensure minimum padding
+
+                                const yMin = Math.max(0, minCount - padding);
+                                const yMax = maxCount + padding;
+
+                                console.log(`Setting Y-axis range: ${yMin.toFixed(0)} to ${yMax.toFixed(0)} (range: ${range.toFixed(0)}, padding: ${padding.toFixed(0)})`);
+
+                                // Update the chart options
+                                fullCameraChart.options.scales.y.min = yMin;
+                                fullCameraChart.options.scales.y.max = yMax;
+
+                                // Force the chart to recognize the new scale
+                                fullCameraChart.options.scales.y.suggestedMin = yMin;
+                                fullCameraChart.options.scales.y.suggestedMax = yMax;
+                            }
+
                             fullCameraChart.update('none');
+                        } else {
+                            console.log('No valid data received for full camera chart');
                         }
 
                         // Update ROI charts
@@ -144,14 +183,39 @@
                             }
 
                             const roiData = data.roi_data[roiId];
-                            if (roiData.timestamps && roiData.counts) {
+                            if (roiData.timestamps && roiData.counts && roiData.counts.length > 0) {
                                 const startTime = roiData.timestamps[0] || 0;
                                 const chartData = roiData.timestamps.map((timestamp, index) => ({
                                     x: timestamp - startTime,
                                     y: roiData.counts[index]
                                 }));
 
+                                console.log(`ROI ${roiId} chart data:`, chartData);
+                                console.log(`ROI ${roiId} Y-values range:`, Math.min(...roiData.counts), 'to', Math.max(...roiData.counts));
+
                                 roiCharts[roiId].data.datasets[0].data = chartData;
+
+                                // Dynamic Y-axis scaling for ROI charts (same improved logic as full camera)
+                                if (roiData.counts.length > 0) {
+                                    const maxCount = Math.max(...roiData.counts);
+                                    const minCount = Math.min(...roiData.counts);
+                                    const range = maxCount - minCount;
+                                    const padding = Math.max(range * 0.1, maxCount * 0.05, 1); // Ensure minimum padding
+
+                                    const yMin = Math.max(0, minCount - padding);
+                                    const yMax = maxCount + padding;
+
+                                    console.log(`ROI ${roiId} Y-axis range: ${yMin.toFixed(0)} to ${yMax.toFixed(0)} (range: ${range.toFixed(0)})`);
+
+                                    // Update the chart options
+                                    roiCharts[roiId].options.scales.y.min = yMin;
+                                    roiCharts[roiId].options.scales.y.max = yMax;
+
+                                    // Force the chart to recognize the new scale
+                                    roiCharts[roiId].options.scales.y.suggestedMin = yMin;
+                                    roiCharts[roiId].options.scales.y.suggestedMax = yMax;
+                                }
+
                                 roiCharts[roiId].update('none');
                             }
                         }
