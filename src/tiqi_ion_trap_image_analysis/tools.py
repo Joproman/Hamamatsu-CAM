@@ -53,26 +53,23 @@ class Main(Thread):
         """
         Thread.__init__(self)
 
-        # Connect to influxdb
-        # self.db = influxdb.InfluxDBClient(
-        #     host=settings.DB_HOST,
-        #     port=settings.DB_PORT,
-        #     username=settings.DB_USER,
-        #     password=settings.DB_PWD,
-        #     database=settings.DB_DATASET,
-        #     ssl=True,
-        #     verify_ssl=True
-        # )
-        self.client = InfluxDBClient(
-            # url="http://avalon.qchub.ch:8086",
-            url="http://influxdb.qchub.ch:8086",
-            # token="1SnC41qsbuiLtHbd5C1vkNRIYtqL5qvTME1agVYO_3R9NtcBt-ZC29khymkaoYuGJ46VTp2hGw1MXcjLzQE-ng==",
-            token="O-iKMjUeuROGkGeRdpeX0YwqLAqh7fmBnkit5w2ehWKqTrqmR9jGY1Tm32pRWc8vPDGfNeP_gKpuYDJfEnkBbA==",
-            org="qchub",
-        )
-        self.api = self.client.buckets_api()
-        self.bucket = "qchub" # self.api.find_bucket_by_name("qchub")
-        self.org = "qchub"
+        # Connect to influxdb (optional for local development)
+        self.influxdb_enabled = True
+        try:
+            self.client = InfluxDBClient(
+                url="http://influxdb.qchub.ch:8086",
+                token="O-iKMjUeuROGkGeRdpeX0YwqLAqh7fmBnkit5w2ehWKqTrqmR9jGY1Tm32pRWc8vPDGfNeP_gKpuYDJfEnkBbA==",
+                org="qchub",
+            )
+            self.api = self.client.buckets_api()
+            self.bucket = "qchub"
+            self.org = "qchub"
+            print("InfluxDB connection established")
+        except Exception as e:
+            print(f"Warning: Could not connect to InfluxDB: {e}")
+            print("Continuing without InfluxDB logging...")
+            self.influxdb_enabled = False
+            self.client = None
 
         # Connect to camera
         self.cam = cam
@@ -243,8 +240,14 @@ class Main(Thread):
         }
 
     def write_data(self, data, write_option=SYNCHRONOUS):
-        write_api = self.client.write_api(write_option)
-        write_api.write(bucket=self.bucket, record=data, org=self.org)
+        if self.influxdb_enabled and self.client is not None:
+            try:
+                write_api = self.client.write_api(write_option)
+                write_api.write(bucket=self.bucket, record=data, org=self.org)
+            except Exception as e:
+                print(f"Warning: Failed to write to InfluxDB: {e}")
+                self.influxdb_enabled = False  # Disable for future attempts
+        # If InfluxDB is disabled, silently skip data writing
 
     def _save_in_memory(self, output):
         """
@@ -290,8 +293,11 @@ class Main(Thread):
                 # self.write_data(grafana_data)
                 # print(grafana_data)
                 # print(datetime.now(), 'num_ions', output['num_ions'])
-            except (ConnectionError, influxdb.exceptions.InfluxDBClientError, influxdb.exceptions.InfluxDBServerError):
-                warnings.warn("ConnectionError: Can't connect to Grafana")
+            except Exception as e:
+                # Handle any InfluxDB connection errors gracefully
+                if self.influxdb_enabled:
+                    print(f"Warning: InfluxDB write failed: {e}")
+                    self.influxdb_enabled = False
 
 
 class Memory:
