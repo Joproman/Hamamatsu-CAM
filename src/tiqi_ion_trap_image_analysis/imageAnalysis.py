@@ -615,14 +615,21 @@ def imageAnalysis(cam, settings):
         try:
             # Load current image
             acquire_semaphore_read(SEM)
+            if 'image' not in main.output:
+                release_semaphore_read(SEM)
+                return {'success': False, 'message': 'Camera data not ready yet'}
+
             current_image = main.output['image'].copy()
             release_semaphore_read(SEM)
 
             background_image = current_image.copy()
             background_captured = True
 
+            print(f"Background captured successfully. Image shape: {background_image.shape}, Mean value: {np.mean(background_image)}")
+
             return {'success': True, 'message': 'Background captured successfully'}
         except Exception as e:
+            print(f"Error capturing background: {e}")
             return {'success': False, 'message': f'Error capturing background: {str(e)}'}
 
     def calculate_photoelectrons(image):
@@ -630,13 +637,20 @@ def imageAnalysis(cam, settings):
         Calculate photoelectron count using Hamamatsu C15550-20UP photon number resolving
         This camera has individual pixel calibration and real-time correction built-in
         """
+        global background_captured, background_image
+
+        original_sum = np.sum(image.astype(np.float64))
+
         if background_captured and background_image is not None:
             # Subtract background noise (important for accurate photon counting)
             corrected_image = image.astype(np.float64) - background_image.astype(np.float64)
             # Ensure no negative values (physical constraint)
             corrected_image = np.maximum(corrected_image, 0)
+            corrected_sum = np.sum(corrected_image)
+            print(f"Background subtraction applied. Original sum: {original_sum:.0f}, Corrected sum: {corrected_sum:.0f}, Background mean: {np.mean(background_image):.1f}")
         else:
             corrected_image = image.astype(np.float64)
+            print(f"No background subtraction. Background captured: {background_captured}, Background image available: {background_image is not None}")
 
         # The C15550-20UP has ultra-low readout noise (0.27 electrons rms)
         # which enables photon number resolving at the individual pixel level
@@ -674,76 +688,96 @@ def imageAnalysis(cam, settings):
             photoelectron_image = calculate_photon_counts_per_pixel(image)
 
             # Create histogram of photoelectron values per pixel
-            # Range adjusted for typical photon counting applications
             max_photons = max(5, np.percentile(photoelectron_image.flatten(), 99))
             hist, bin_edges = np.histogram(photoelectron_image.flatten(), bins=50, range=(0, max_photons))
+            x_label = 'Photoelectrons per Pixel'
+            title = 'Photoelectron Histogram (C15550-20UP)'
+
         except Exception as e:
             print(f"Error in photon counting: {e}")
             # Create fallback histogram with simple ADU values
             hist, bin_edges = np.histogram(image.flatten(), bins=50)
+            x_label = 'ADU Values'
+            title = 'ADU Histogram (Fallback)'
 
-        # Create plot
+        # Always return a valid image - try matplotlib first, then fallback
         try:
             import matplotlib
             matplotlib.use('Agg')  # Use non-interactive backend
-            from matplotlib.figure import Figure
-            from matplotlib.backends.backend_agg import FigureCanvasAgg
+            import matplotlib.pyplot as plt
 
-            fig = Figure(figsize=(8, 6))
-            canvas = FigureCanvasAgg(fig)
-        except ImportError:
-            # Fallback: create a simple text-based histogram placeholder
-            placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(placeholder, 'Matplotlib not available', (50, 200),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            cv2.putText(placeholder, 'Histogram cannot be displayed', (50, 250),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            return placeholder
-        ax = fig.add_subplot(111)
+            # Create figure
+            fig, ax = plt.subplots(figsize=(8, 6))
 
-        # Plot histogram
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        ax.bar(bin_centers, hist, width=bin_centers[1]-bin_centers[0], alpha=0.7, color='blue')
+            # Plot histogram
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+            if len(bin_centers) > 1:
+                width = bin_centers[1] - bin_centers[0]
+            else:
+                width = 1
 
-        ax.set_xlabel('Photoelectrons per Pixel')
-        ax.set_ylabel('Frequency')
-        ax.set_title('Photoelectron Histogram')
-        ax.grid(True, alpha=0.3)
+            ax.bar(bin_centers, hist, width=width, alpha=0.7, color='blue')
+            ax.set_xlabel(x_label)
+            ax.set_ylabel('Frequency')
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3)
 
-        # Convert plot to image
-        canvas.draw()
-        width, height = fig.get_size_inches() * fig.get_dpi()
+            # Convert to image
+            fig.canvas.draw()
 
-        # Use the newer matplotlib API
-        try:
-            # Try the newer method first
-            buf = canvas.buffer_rgba()
-            image_array = np.asarray(buf).reshape(int(height), int(width), 4)
-            # Convert RGBA to RGB
-            image_array = image_array[:, :, :3]
-        except AttributeError:
-            # Fallback to older method if available
-            try:
-                image_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
-            except AttributeError:
-                # Use alternative method
-                buf = canvas.print_to_buffer()
-                image_array = np.frombuffer(buf[0], dtype='uint8').reshape(int(height), int(width), 4)
-                image_array = image_array[:, :, :3]
+            # Get the RGBA buffer from the figure
+            buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (3,))
 
             # Convert RGB to BGR for OpenCV
-            image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+            image_bgr = cv2.cvtColor(buf, cv2.COLOR_RGB2BGR)
+
+            # Clean up
+            plt.close(fig)
+
             return image_bgr
 
         except Exception as e:
-            print(f"Error creating histogram plot: {e}")
-            # Return a simple error message image
-            error_image = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(error_image, 'Histogram Error', (200, 200),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            cv2.putText(error_image, str(e)[:50], (50, 250),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            return error_image
+            print(f"Error creating matplotlib histogram: {e}")
+
+            # Fallback: Create a simple OpenCV-based histogram visualization
+            try:
+                # Create a simple bar chart using OpenCV
+                img_height, img_width = 480, 640
+                result_img = np.zeros((img_height, img_width, 3), dtype=np.uint8)
+
+                # Draw background
+                cv2.rectangle(result_img, (0, 0), (img_width, img_height), (50, 50, 50), -1)
+
+                # Draw title
+                cv2.putText(result_img, title, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+                # Normalize histogram for display
+                if len(hist) > 0 and np.max(hist) > 0:
+                    norm_hist = hist / np.max(hist) * 300  # Scale to fit in image
+
+                    # Draw bars
+                    bar_width = max(1, (img_width - 100) // len(hist))
+                    for i, h in enumerate(norm_hist):
+                        x = 50 + i * bar_width
+                        y_top = img_height - 100
+                        y_bottom = int(y_top - h)
+                        cv2.rectangle(result_img, (x, y_bottom), (x + bar_width - 1, y_top), (100, 150, 255), -1)
+
+                # Add axis labels
+                cv2.putText(result_img, x_label, (50, img_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                cv2.putText(result_img, 'Frequency', (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+                return result_img
+
+            except Exception as e2:
+                print(f"Error creating OpenCV fallback histogram: {e2}")
+
+                # Ultimate fallback: Simple error message image
+                error_img = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(error_img, 'Histogram Error', (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                cv2.putText(error_img, 'Unable to generate histogram', (150, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+                return error_img
 
     @app.route('/photoelectron_graph')
     def photoelectron_graph():
@@ -757,6 +791,8 @@ def imageAnalysis(cam, settings):
         """
         Return time series data for photoelectron graphs
         """
+        global photoelectron_history
+        print(f"Photoelectron data requested. History length: {len(photoelectron_history['timestamps'])}, ROI count: {len(photoelectron_history['roi_data'])}")
         return photoelectron_history
 
     def update_photoelectron_history():
@@ -771,6 +807,7 @@ def imageAnalysis(cam, settings):
             acquire_semaphore_read(SEM)
             if 'image' not in main.output:
                 release_semaphore_read(SEM)
+                print("Skipping photoelectron history update - image not ready")
                 return  # Skip update if image not ready yet
 
             image = main.output['image'].copy()
@@ -792,6 +829,10 @@ def imageAnalysis(cam, settings):
         if len(photoelectron_history['timestamps']) > 100:
             photoelectron_history['timestamps'].pop(0)
             photoelectron_history['counts'].pop(0)
+
+        # Print debug info occasionally
+        if len(photoelectron_history['timestamps']) % 10 == 0:
+            print(f"Photoelectron history updated. Points: {len(photoelectron_history['timestamps'])}, Latest count: {full_camera_count}")
 
         # Update ROI data
         for roi_id in roi_regions:
@@ -829,16 +870,21 @@ def imageAnalysis(cam, settings):
 
     # Start background thread to update photoelectron history
     import threading
+
     def history_updater():
+        print("Photoelectron history updater thread started")
         while True:
             time.sleep(1)  # Update every second
             try:
-                if 'photoelectron_history' in globals() and 'roi_regions' in globals():
+                if 'photoelectron_history' in globals() and 'roi_regions' in globals() and 'main' in globals():
                     update_photoelectron_history()
+                else:
+                    print("Waiting for variables to be initialized...")
             except Exception as e:
-                print(f"Error updating photoelectron history: {e}")
+                print(f"Error in history updater thread: {e}")
 
     history_thread = threading.Thread(target=history_updater, daemon=True)
     history_thread.start()
+    print("Background thread for photoelectron history started")
 
     app.run(debug=False, host="0.0.0.0", port=5000)
