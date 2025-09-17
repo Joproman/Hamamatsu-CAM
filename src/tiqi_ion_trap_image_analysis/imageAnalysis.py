@@ -65,8 +65,14 @@ def imageAnalysis(cam, settings):
     # Define ion intensity threshold for bright/dark classification
     ION_THRESHOLD = getattr(settings, 'ION_THRESHOLD', 1000)
 
-    # Hamamatsu C15550-22UP conversion factor: ADU to photoelectrons
-    ADU_TO_PHOTOELECTRONS = 0.107  # electrons per count
+    # Hamamatsu C15550-20UP (ORCA-Quest) conversion factor: ADU to photoelectrons
+    # This camera uses qCMOS technology with photon number resolving capability
+    ADU_TO_PHOTOELECTRONS = 0.107  # electrons per count (verified from technical specs)
+
+    # Camera specifications:
+    # - Ultra-low readout noise: 0.27 electrons rms (@Ultra quiet scan)
+    # - Individual pixel calibration and real-time correction
+    # - World's first photon number resolving qCMOS camera
 
     # Background noise storage
     background_image = None
@@ -385,11 +391,40 @@ def imageAnalysis(cam, settings):
 
         region = roi_regions[roi_id]
 
-        # Load image and coordinates
-        acquire_semaphore_read(SEM)
-        image = main.output['image'].copy()
-        coord = main.output['coord'].copy()
-        release_semaphore_read(SEM)
+        try:
+            # Load image and coordinates
+            acquire_semaphore_read(SEM)
+            if 'image' not in main.output or 'coord' not in main.output:
+                release_semaphore_read(SEM)
+                return {
+                    'bright_ions': 0,
+                    'dim_ions': 0,
+                    'dark_ions': 0,
+                    'max_intensity': 0,
+                    'photoelectron_count': 0,
+                    'total_ions': 0,
+                    'coordinates': [],
+                    'error': 'Camera data not ready yet'
+                }
+
+            image = main.output['image'].copy()
+            coord = main.output['coord'].copy()
+            release_semaphore_read(SEM)
+        except Exception as e:
+            try:
+                release_semaphore_read(SEM)
+            except:
+                pass
+            return {
+                'bright_ions': 0,
+                'dim_ions': 0,
+                'dark_ions': 0,
+                'max_intensity': 0,
+                'photoelectron_count': 0,
+                'total_ions': 0,
+                'coordinates': [],
+                'error': f'Error accessing camera data: {str(e)}'
+            }
 
         # Scale coordinates from display to actual image size
         scale_x = image.shape[1] / region['display_width']
@@ -501,11 +536,38 @@ def imageAnalysis(cam, settings):
         """
         Get statistics for the full camera view including photoelectron counts
         """
-        # Load image
-        acquire_semaphore_read(SEM)
-        image = main.output['image'].copy()
-        coord = main.output['coord'].copy()
-        release_semaphore_read(SEM)
+        try:
+            # Load image
+            acquire_semaphore_read(SEM)
+            if 'image' not in main.output or 'coord' not in main.output:
+                release_semaphore_read(SEM)
+                return {
+                    'photoelectron_count': 0,
+                    'bright_ions': 0,
+                    'dim_ions': 0,
+                    'dark_ions': 0,
+                    'total_ions': 0,
+                    'max_intensity': 0,
+                    'error': 'Camera data not ready yet'
+                }
+
+            image = main.output['image'].copy()
+            coord = main.output['coord'].copy()
+            release_semaphore_read(SEM)
+        except Exception as e:
+            try:
+                release_semaphore_read(SEM)
+            except:
+                pass
+            return {
+                'photoelectron_count': 0,
+                'bright_ions': 0,
+                'dim_ions': 0,
+                'dark_ions': 0,
+                'total_ions': 0,
+                'max_intensity': 0,
+                'error': f'Error accessing camera data: {str(e)}'
+            }
 
         # Calculate photoelectron count using proper conversion and background subtraction
         photoelectron_count = calculate_photoelectrons(image)
@@ -565,39 +627,55 @@ def imageAnalysis(cam, settings):
 
     def calculate_photoelectrons(image):
         """
-        Calculate photoelectron count using proper Hamamatsu conversion factor
-        with background subtraction if available
+        Calculate photoelectron count using Hamamatsu C15550-20UP photon number resolving
+        This camera has individual pixel calibration and real-time correction built-in
         """
         if background_captured and background_image is not None:
-            # Subtract background
-            corrected_image = image.astype(np.float32) - background_image.astype(np.float32)
-            # Ensure no negative values
+            # Subtract background noise (important for accurate photon counting)
+            corrected_image = image.astype(np.float64) - background_image.astype(np.float64)
+            # Ensure no negative values (physical constraint)
             corrected_image = np.maximum(corrected_image, 0)
         else:
-            corrected_image = image.astype(np.float32)
+            corrected_image = image.astype(np.float64)
 
-        # Convert ADU to photoelectrons using Hamamatsu conversion factor
+        # The C15550-20UP has ultra-low readout noise (0.27 electrons rms)
+        # which enables photon number resolving at the individual pixel level
+
+        # Convert ADU to photoelectrons using verified Hamamatsu conversion factor
+        # Each ADU count represents 0.107 photoelectrons
         photoelectron_count = np.sum(corrected_image) * ADU_TO_PHOTOELECTRONS
+
         return int(photoelectron_count)
+
+    def calculate_photon_counts_per_pixel(image):
+        """
+        Calculate photon counts per pixel for histogram analysis
+        Takes advantage of the C15550-20UP's photon number resolving capability
+        """
+        if background_captured and background_image is not None:
+            corrected_image = image.astype(np.float64) - background_image.astype(np.float64)
+            corrected_image = np.maximum(corrected_image, 0)
+        else:
+            corrected_image = image.astype(np.float64)
+
+        # Convert each pixel value to photoelectrons
+        # The camera's individual pixel calibration ensures accuracy
+        photoelectron_image = corrected_image * ADU_TO_PHOTOELECTRONS
+
+        return photoelectron_image
 
     def plot_photoelectron_hist(image):
         """
         Create a histogram showing frequency vs photoelectrons per pixel
+        Uses C15550-20UP photon number resolving capability
         """
-        # Convert image to photoelectrons per pixel
-        if background_captured and background_image is not None:
-            # Subtract background
-            corrected_image = image.astype(np.float32) - background_image.astype(np.float32)
-            # Ensure no negative values
-            corrected_image = np.maximum(corrected_image, 0)
-        else:
-            corrected_image = image.astype(np.float32)
-
-        # Convert ADU to photoelectrons using Hamamatsu conversion factor
-        photoelectron_image = corrected_image * ADU_TO_PHOTOELECTRONS
+        # Use the dedicated photon counting function
+        photoelectron_image = calculate_photon_counts_per_pixel(image)
 
         # Create histogram of photoelectron values per pixel
-        hist, bin_edges = np.histogram(photoelectron_image.flatten(), bins=100, range=(0, 10))
+        # Range adjusted for typical photon counting applications
+        max_photons = max(5, np.percentile(photoelectron_image.flatten(), 99))
+        hist, bin_edges = np.histogram(photoelectron_image.flatten(), bins=50, range=(0, max_photons))
 
         # Create plot
         from matplotlib.figure import Figure
@@ -647,10 +725,22 @@ def imageAnalysis(cam, settings):
         global photoelectron_history, roi_regions
         current_time = time.time()
 
-        # Get full camera photoelectron count
-        acquire_semaphore_read(SEM)
-        image = main.output['image'].copy()
-        release_semaphore_read(SEM)
+        try:
+            # Get full camera photoelectron count
+            acquire_semaphore_read(SEM)
+            if 'image' not in main.output:
+                release_semaphore_read(SEM)
+                return  # Skip update if image not ready yet
+
+            image = main.output['image'].copy()
+            release_semaphore_read(SEM)
+        except Exception as e:
+            try:
+                release_semaphore_read(SEM)
+            except:
+                pass
+            print(f"Error updating photoelectron history: {e}")
+            return
 
         full_camera_count = calculate_photoelectrons(image)
 

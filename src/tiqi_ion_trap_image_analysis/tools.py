@@ -90,7 +90,24 @@ class Main(Thread):
 
         # Define class attributes
         self.init_time = time.time()
-        self.output = {}
+        # Initialize output with default values to prevent KeyError
+        self.output = {
+            'image': np.zeros((100, 100), dtype=np.uint16),
+            'coord': np.array([]),
+            'com_coord': np.array([]),
+            'num_ions': 0,
+            'bright_ions': 0,
+            'dim_ions': 0,
+            'dark_ions': 0,
+            'linearity': 'No ions',
+            'max_int': 0,
+            'num_pixels': 0,
+            'reorder_avg': 0,
+            'max_spot_size': 0,
+            'roundness': 0,
+            'fit_error': 0,
+            'fit_avg': 0
+        }
 
         # Add toggle for ion detection
         self.ion_detection = True
