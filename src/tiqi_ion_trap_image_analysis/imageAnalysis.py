@@ -62,6 +62,19 @@ def imageAnalysis(cam, settings):
     # Define cross_hairs with their color
     list_cross_hairs = settings.CROSS_HAIRS
 
+    # Define ion intensity threshold for bright/dark classification
+    ION_THRESHOLD = getattr(settings, 'ION_THRESHOLD', 1000)
+
+    # Hamamatsu C15550-22UP conversion factor: ADU to photoelectrons
+    ADU_TO_PHOTOELECTRONS = 0.107  # electrons per count
+
+    # Background noise storage
+    background_image = None
+    background_captured = False
+
+    # Time series data storage for graphs
+    photoelectron_history = {'timestamps': [], 'counts': [], 'roi_data': {}}
+
     # Close camera when exiting
     def on_exit():
         """Close camera on exit"""
@@ -142,15 +155,17 @@ def imageAnalysis(cam, settings):
 
     def gen_hist():
         """
-        Return the image's histogram
+        Return the photoelectron histogram (frequency vs photoelectrons)
         """
         while True:
             # Load image and coords from shared memory
             acquire_semaphore_read(SEM)
             image = main.output['image'].copy()
             release_semaphore_read(SEM)
-            image = plot_hist(image, HMIN, HMAX)
-            frame = cv2.imencode(".jpg", image)[1].tobytes()
+
+            # Convert image to photoelectrons and create histogram
+            hist_image = plot_photoelectron_hist(image)
+            frame = cv2.imencode(".jpg", hist_image)[1].tobytes()
             yield (b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
@@ -271,118 +286,6 @@ def imageAnalysis(cam, settings):
         return Response(gen_roi(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-    @app.route('/ROI')
-    def roi_index():
-        return render_template('setROI.html', decode_responses=True)
-
-
-    @app.route('/ROI/update')
-    def set_roi():
-        """
-        Change region of interest.
-        """
-        acquire_semaphore_read(SEM)
-        image = main.output['image'].copy()  # read image
-        release_semaphore_read(SEM)
-
-        x1, y1, x2, y2 = request.args.values()  # load values from UI
-        x1, y1, x2, y2 = float(x1), float(y1), float(x2), float(y2)
-
-        x1 *= image.shape[1]/700  # scale values
-        x2 *= image.shape[1]/700
-        y1 *= image.shape[0]/700
-        y2 *= image.shape[0]/700
-
-        # create region array
-        region = np.rint(np.array([[x1, y1], [x2, y2]])).astype(np.int32)
-
-        # update ROI in shared memory
-        file_path = os.path.dirname(os.path.abspath(__file__)) + "\\data\\region.json"
-        with open(file_path, "w") as f:
-            data = {"ROI": region.tolist()}
-            json.dump(data, f)
-
-        return '[[{}, {}], [{}, {}]]'.format(x1, y1, x2, y2)
-
-
-    @app.route('/cross_hair')
-    def cross_hair():
-        return render_template('cross_hair.html', decode_responses=True, data={'ch': list_cross_hairs['cross_hairs'],
-                                                                            'color': list_cross_hairs['color']})
-
-
-    @app.route('/cross_hair/add')
-    def add_cross_hair():
-        global list_cross_hairs
-        acquire_semaphore_read(SEM)
-        image = main.output['image'].copy()  # read image
-        release_semaphore_read(SEM)
-
-        x, y = request.args.values()  # load values from UI
-        x, y = float(x), float(y)
-
-        ch = np.rint(np.array([x*image.shape[1], y*image.shape[0]])/700).astype(np.int32)
-
-        # get random color
-        h, s, l = random.random(), 0.5 + random.random() / 2.0, 0.4 + random.random() / 5.0
-        color_rgb = [int(256 * i) for i in colorsys.hls_to_rgb(h, l, s)]
-
-        # add cross hair and color to the global list
-        list_cross_hairs['cross_hairs'].append(list(ch))
-        list_cross_hairs['color'].append(color_rgb)
-
-        # add it also to settings.py
-        change_settings('CROSS_HAIRS', list_cross_hairs)
-
-        return {'x': str(ch[0]), 'y': str(ch[1]), 'color': color_rgb, 'num': len(list_cross_hairs['cross_hairs'])}
-
-    @app.route('/cross_hair/update')
-    def update_cross_hair():
-        global list_cross_hairs
-        acquire_semaphore_read(SEM)
-        image = main.output['image'].copy()
-        release_semaphore_read(SEM)
-
-        old_x, old_y, new_x, new_y, color = request.args.values()
-
-        # Delete old crosshair
-        idx = (np.array(list_cross_hairs['cross_hairs']) == [float(old_x), float(old_y)]).any(axis=1).nonzero()[0][0]
-
-        del list_cross_hairs['cross_hairs'][idx]
-        del list_cross_hairs['color'][idx]
-
-        # Add new crosshair
-        color = ast.literal_eval(color[3:])
-
-        color_rgb = [int(color[0]), int(color[1]), int(color[2])]
-
-        img_ch = np.array([float(new_x), float(new_y)])
-        html_ch = np.rint(np.array([float(new_x)/image.shape[1], float(new_y)/image.shape[0]])*700).astype(np.int32)
-
-        list_cross_hairs['cross_hairs'].append(list(img_ch))
-        list_cross_hairs['color'].append(color_rgb)
-
-        change_settings('CROSS_HAIRS', list_cross_hairs)
-
-        return {'html_x': str(html_ch[0]), 'html_y': str(html_ch[1]), 'color': color_rgb}
-
-    @app.route('/cross_hair/delete')
-    def delete_cross_hair():
-        """
-        Change region of interest.
-        """
-        global list_cross_hairs
-
-        x, y = request.args.values()
-
-        idx = (np.array(list_cross_hairs['cross_hairs']) == [int(x), int(y)]).any(axis=1).nonzero()[0][0]
-
-        del list_cross_hairs['cross_hairs'][idx]
-        del list_cross_hairs['color'][idx]
-
-        change_settings('CROSS_HAIRS', list_cross_hairs)
-
-        return "0"
 
 
     @app.route('/hist/stream')
@@ -415,15 +318,6 @@ def imageAnalysis(cam, settings):
         change_settings('HIST_MAX', HMAX)
         return '{}, {}'.format(HMIN, HMAX)
 
-    @app.route('/rotate')
-    def rotate_img():
-        global RANGLE
-        angle = request.args.get("angle")
-        RANGLE = int(angle) + 90
-        if RANGLE == 360:
-            RANGLE = 0
-        change_settings('RANGLE', RANGLE)
-        return str(RANGLE)
 
     # Multiple ROI management
     roi_regions = {}
@@ -518,21 +412,49 @@ def imageAnalysis(cam, settings):
             if x1 <= c[0] <= x2 and y1 <= c[1] <= y2:
                 roi_coords.append(c)
 
-        # Count ions by intensity (this is a simplified version)
-        roi_coords = np.array(roi_coords) if roi_coords else np.array([])
-        bright_ions = len(roi_coords)  # Simplified - all detected ions are counted as bright
+        # Count ions by intensity using the threshold
+        bright_ions = 0
+        dim_ions = 0
+        dark_ions = 0
 
-        # Get max intensity in ROI
+        for c in roi_coords:
+            if len(c) >= 3:  # Assuming coordinate format includes intensity
+                intensity = c[2] if len(c) > 2 else 0
+                if intensity > ION_THRESHOLD * 1.5:  # Bright threshold
+                    bright_ions += 1
+                elif intensity > ION_THRESHOLD * 0.5:  # Dim threshold
+                    dim_ions += 1
+                else:  # Dark threshold
+                    dark_ions += 1
+            else:
+                # If no intensity info, classify based on pixel value at coordinate
+                if 0 <= c[0] < image.shape[1] and 0 <= c[1] < image.shape[0]:
+                    pixel_intensity = image[int(c[1]), int(c[0])]
+                    if pixel_intensity > ION_THRESHOLD * 1.5:
+                        bright_ions += 1
+                    elif pixel_intensity > ION_THRESHOLD * 0.5:
+                        dim_ions += 1
+                    else:
+                        dark_ions += 1
+
+        # Get max intensity and photoelectron count in ROI
         if x2 > x1 and y2 > y1:
             roi_image = image[y1:y2, x1:x2]
             max_intensity = int(np.max(roi_image)) if roi_image.size > 0 else 0
+            photoelectron_count = calculate_photoelectrons(roi_image) if roi_image.size > 0 else 0
         else:
             max_intensity = 0
+            photoelectron_count = 0
+
+        roi_coords = np.array(roi_coords) if roi_coords else np.array([])
 
         return {
             'bright_ions': bright_ions,
-            'dim_ions': 0,  # Simplified for now
+            'dim_ions': dim_ions,
+            'dark_ions': dark_ions,
             'max_intensity': max_intensity,
+            'photoelectron_count': photoelectron_count,
+            'total_ions': len(roi_coords),
             'coordinates': roi_coords.tolist() if len(roi_coords) > 0 else []
         }
 
@@ -561,5 +483,230 @@ def imageAnalysis(cam, settings):
         if roi_id in roi_regions:
             del roi_regions[roi_id]
         return {'success': True}
+
+    @app.route('/set_ion_threshold')
+    def set_ion_threshold():
+        """
+        Set the ion intensity threshold for bright/dark classification
+        """
+        global ION_THRESHOLD
+        threshold = request.args.get('threshold')
+        if threshold:
+            ION_THRESHOLD = float(threshold)
+            change_settings('ION_THRESHOLD', ION_THRESHOLD)
+        return str(ION_THRESHOLD)
+
+    @app.route('/full_camera_stats')
+    def full_camera_stats():
+        """
+        Get statistics for the full camera view including photoelectron counts
+        """
+        # Load image
+        acquire_semaphore_read(SEM)
+        image = main.output['image'].copy()
+        coord = main.output['coord'].copy()
+        release_semaphore_read(SEM)
+
+        # Calculate photoelectron count using proper conversion and background subtraction
+        photoelectron_count = calculate_photoelectrons(image)
+
+        # Count bright, dim, and dark ions based on intensity threshold
+        bright_ions = 0
+        dim_ions = 0
+        dark_ions = 0
+
+        for c in coord:
+            if len(c) >= 3:  # Assuming coordinate format includes intensity
+                intensity = c[2] if len(c) > 2 else 0
+                if intensity > ION_THRESHOLD * 1.5:  # Bright threshold
+                    bright_ions += 1
+                elif intensity > ION_THRESHOLD * 0.5:  # Dim threshold
+                    dim_ions += 1
+                else:  # Dark threshold
+                    dark_ions += 1
+            else:
+                # If no intensity info, classify based on pixel value at coordinate
+                if 0 <= c[0] < image.shape[1] and 0 <= c[1] < image.shape[0]:
+                    pixel_intensity = image[int(c[1]), int(c[0])]
+                    if pixel_intensity > ION_THRESHOLD * 1.5:
+                        bright_ions += 1
+                    elif pixel_intensity > ION_THRESHOLD * 0.5:
+                        dim_ions += 1
+                    else:
+                        dark_ions += 1
+
+        return {
+            'photoelectron_count': photoelectron_count,
+            'bright_ions': bright_ions,
+            'dim_ions': dim_ions,
+            'dark_ions': dark_ions,
+            'total_ions': len(coord),
+            'max_intensity': int(np.max(image)) if image.size > 0 else 0
+        }
+
+    @app.route('/capture_background', methods=['POST'])
+    def capture_background():
+        """
+        Capture the current image as background for noise subtraction
+        """
+        global background_image, background_captured
+        try:
+            # Load current image
+            acquire_semaphore_read(SEM)
+            current_image = main.output['image'].copy()
+            release_semaphore_read(SEM)
+
+            background_image = current_image.copy()
+            background_captured = True
+
+            return {'success': True, 'message': 'Background captured successfully'}
+        except Exception as e:
+            return {'success': False, 'message': f'Error capturing background: {str(e)}'}
+
+    def calculate_photoelectrons(image):
+        """
+        Calculate photoelectron count using proper Hamamatsu conversion factor
+        with background subtraction if available
+        """
+        if background_captured and background_image is not None:
+            # Subtract background
+            corrected_image = image.astype(np.float32) - background_image.astype(np.float32)
+            # Ensure no negative values
+            corrected_image = np.maximum(corrected_image, 0)
+        else:
+            corrected_image = image.astype(np.float32)
+
+        # Convert ADU to photoelectrons using Hamamatsu conversion factor
+        photoelectron_count = np.sum(corrected_image) * ADU_TO_PHOTOELECTRONS
+        return int(photoelectron_count)
+
+    def plot_photoelectron_hist(image):
+        """
+        Create a histogram showing frequency vs photoelectrons per pixel
+        """
+        # Convert image to photoelectrons per pixel
+        if background_captured and background_image is not None:
+            # Subtract background
+            corrected_image = image.astype(np.float32) - background_image.astype(np.float32)
+            # Ensure no negative values
+            corrected_image = np.maximum(corrected_image, 0)
+        else:
+            corrected_image = image.astype(np.float32)
+
+        # Convert ADU to photoelectrons using Hamamatsu conversion factor
+        photoelectron_image = corrected_image * ADU_TO_PHOTOELECTRONS
+
+        # Create histogram of photoelectron values per pixel
+        hist, bin_edges = np.histogram(photoelectron_image.flatten(), bins=100, range=(0, 10))
+
+        # Create plot
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+        fig = Figure(figsize=(8, 6))
+        canvas = FigureCanvasAgg(fig)
+        ax = fig.add_subplot(111)
+
+        # Plot histogram
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        ax.bar(bin_centers, hist, width=bin_centers[1]-bin_centers[0], alpha=0.7, color='blue')
+
+        ax.set_xlabel('Photoelectrons per Pixel')
+        ax.set_ylabel('Frequency')
+        ax.set_title('Photoelectron Histogram')
+        ax.grid(True, alpha=0.3)
+
+        # Convert plot to image
+        canvas.draw()
+        width, height = fig.get_size_inches() * fig.get_dpi()
+        image_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
+
+        # Convert RGB to BGR for OpenCV
+        image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+
+        return image_bgr
+
+    @app.route('/photoelectron_graph')
+    def photoelectron_graph():
+        """
+        Display photoelectrons vs time graphs for full camera and ROIs
+        """
+        return render_template('photoelectron_graph.html', decode_responses=True)
+
+    @app.route('/photoelectron_data')
+    def photoelectron_data():
+        """
+        Return time series data for photoelectron graphs
+        """
+        return photoelectron_history
+
+    def update_photoelectron_history():
+        """
+        Update time series data with current photoelectron counts
+        """
+        global photoelectron_history
+        current_time = time.time()
+
+        # Get full camera photoelectron count
+        acquire_semaphore_read(SEM)
+        image = main.output['image'].copy()
+        release_semaphore_read(SEM)
+
+        full_camera_count = calculate_photoelectrons(image)
+
+        # Add to history (keep last 100 points)
+        photoelectron_history['timestamps'].append(current_time)
+        photoelectron_history['counts'].append(full_camera_count)
+
+        if len(photoelectron_history['timestamps']) > 100:
+            photoelectron_history['timestamps'].pop(0)
+            photoelectron_history['counts'].pop(0)
+
+        # Update ROI data
+        for roi_id in roi_regions:
+            region = roi_regions[roi_id]
+
+            # Scale coordinates from display to actual image size
+            scale_x = image.shape[1] / region['display_width']
+            scale_y = image.shape[0] / region['display_height']
+
+            x1 = int(region['x'] * scale_x)
+            y1 = int(region['y'] * scale_y)
+            x2 = int((region['x'] + region['width']) * scale_x)
+            y2 = int((region['y'] + region['height']) * scale_y)
+
+            # Ensure coordinates are within image bounds
+            x1 = max(0, min(x1, image.shape[1]))
+            y1 = max(0, min(y1, image.shape[0]))
+            x2 = max(x1, min(x2, image.shape[1]))
+            y2 = max(y1, min(y2, image.shape[0]))
+
+            if x2 > x1 and y2 > y1:
+                roi_image = image[y1:y2, x1:x2]
+                roi_count = calculate_photoelectrons(roi_image)
+
+                if roi_id not in photoelectron_history['roi_data']:
+                    photoelectron_history['roi_data'][roi_id] = {'timestamps': [], 'counts': []}
+
+                photoelectron_history['roi_data'][roi_id]['timestamps'].append(current_time)
+                photoelectron_history['roi_data'][roi_id]['counts'].append(roi_count)
+
+                # Keep last 100 points for each ROI
+                if len(photoelectron_history['roi_data'][roi_id]['timestamps']) > 100:
+                    photoelectron_history['roi_data'][roi_id]['timestamps'].pop(0)
+                    photoelectron_history['roi_data'][roi_id]['counts'].pop(0)
+
+    # Start background thread to update photoelectron history
+    import threading
+    def history_updater():
+        while True:
+            time.sleep(1)  # Update every second
+            try:
+                update_photoelectron_history()
+            except Exception as e:
+                print(f"Error updating photoelectron history: {e}")
+
+    history_thread = threading.Thread(target=history_updater, daemon=True)
+    history_thread.start()
 
     app.run(debug=False, host="0.0.0.0", port=5000)

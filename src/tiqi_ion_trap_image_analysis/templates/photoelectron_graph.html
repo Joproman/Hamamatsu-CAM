@@ -1,0 +1,182 @@
+<html>
+    <head>
+        <title>Photoelectrons vs Time Graph</title>
+        <link rel="shortcut icon" href="#">
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/css/bootstrap.min.css">
+        <style>
+            .graph-container {
+                margin: 20px;
+                padding: 20px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                background-color: #f9f9f9;
+            }
+            h1, h2 {text-align: center}
+            .chart-wrapper {
+                position: relative;
+                height: 400px;
+                margin-bottom: 30px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1 style="font-size: 45px">Photoelectrons vs Time Graphs</h1>
+
+        <div class="graph-container">
+            <h2>Full Camera Photoelectron Count</h2>
+            <div class="chart-wrapper">
+                <canvas id="fullCameraChart"></canvas>
+            </div>
+        </div>
+
+        <div id="roiGraphsContainer">
+        </div>
+
+        <div style="text-align: center; margin: 20px;">
+            <form action="/">
+                <input type="submit" value="Back to Main" style="padding: 10px 20px; font-size: 16px;" />
+            </form>
+        </div>
+
+        <script>
+            let fullCameraChart;
+            let roiCharts = {};
+
+            // Chart configuration
+            const chartConfig = {
+                type: 'line',
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: {
+                                display: true,
+                                text: 'Time (seconds)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Photoelectron Count'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        }
+                    }
+                }
+            };
+
+            function initializeFullCameraChart() {
+                const ctx = document.getElementById('fullCameraChart').getContext('2d');
+                fullCameraChart = new Chart(ctx, {
+                    ...chartConfig,
+                    data: {
+                        datasets: [{
+                            label: 'Full Camera Photoelectrons',
+                            data: [],
+                            borderColor: 'rgb(75, 192, 192)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            tension: 0.1
+                        }]
+                    }
+                });
+            }
+
+            function createROIChart(roiId) {
+                const container = document.getElementById('roiGraphsContainer');
+
+                // Create ROI graph container
+                const roiDiv = document.createElement('div');
+                roiDiv.className = 'graph-container';
+                roiDiv.id = `roi-graph-${roiId}`;
+                roiDiv.innerHTML = `
+                    <h2>ROI ${roiId} Photoelectron Count</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="roiChart${roiId}"></canvas>
+                    </div>
+                `;
+
+                container.appendChild(roiDiv);
+
+                // Initialize chart
+                const ctx = document.getElementById(`roiChart${roiId}`).getContext('2d');
+                roiCharts[roiId] = new Chart(ctx, {
+                    ...chartConfig,
+                    data: {
+                        datasets: [{
+                            label: `ROI ${roiId} Photoelectrons`,
+                            data: [],
+                            borderColor: `hsl(${roiId * 60}, 70%, 50%)`,
+                            backgroundColor: `hsla(${roiId * 60}, 70%, 50%, 0.2)`,
+                            tension: 0.1
+                        }]
+                    }
+                });
+            }
+
+            function updateCharts() {
+                fetch('/photoelectron_data')
+                    .then(response => response.json())
+                    .then(data => {
+                        // Update full camera chart
+                        if (data.timestamps && data.counts) {
+                            const startTime = data.timestamps[0] || 0;
+                            const chartData = data.timestamps.map((timestamp, index) => ({
+                                x: timestamp - startTime,
+                                y: data.counts[index]
+                            }));
+
+                            fullCameraChart.data.datasets[0].data = chartData;
+                            fullCameraChart.update('none');
+                        }
+
+                        // Update ROI charts
+                        for (const roiId in data.roi_data) {
+                            if (!roiCharts[roiId]) {
+                                createROIChart(roiId);
+                            }
+
+                            const roiData = data.roi_data[roiId];
+                            if (roiData.timestamps && roiData.counts) {
+                                const startTime = roiData.timestamps[0] || 0;
+                                const chartData = roiData.timestamps.map((timestamp, index) => ({
+                                    x: timestamp - startTime,
+                                    y: roiData.counts[index]
+                                }));
+
+                                roiCharts[roiId].data.datasets[0].data = chartData;
+                                roiCharts[roiId].update('none');
+                            }
+                        }
+
+                        // Remove charts for deleted ROIs
+                        for (const roiId in roiCharts) {
+                            if (!(roiId in data.roi_data)) {
+                                const roiDiv = document.getElementById(`roi-graph-${roiId}`);
+                                if (roiDiv) {
+                                    roiDiv.remove();
+                                }
+                                roiCharts[roiId].destroy();
+                                delete roiCharts[roiId];
+                            }
+                        }
+                    })
+                    .catch(error => console.error('Error fetching photoelectron data:', error));
+            }
+
+            // Initialize charts and start updating
+            window.onload = function() {
+                initializeFullCameraChart();
+                updateCharts();
+                setInterval(updateCharts, 1000); // Update every second
+            };
+        </script>
+    </body>
+</html>

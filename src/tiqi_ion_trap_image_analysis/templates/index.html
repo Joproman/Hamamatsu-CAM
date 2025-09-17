@@ -67,14 +67,30 @@
                         <button type="button" class="exp-click" onclick="changeExpTime('.exp-click')">Update</button>
                     </form>
                 </div>
+                <div style="font-size: 23px; margin-top: 10px;" class="thresholdSetting">
+                    Ion intensity threshold:
+                    <form target="votar">
+                        <input type="number" class="intensityThreshold" placeholder="1000" style="width:100px" step="100" value="1000">
+                        <button type="button" class="threshold-click" onclick="changeThreshold('.threshold-click')">Update</button>
+                    </form>
+                </div>
+                <div style="font-size: 23px; margin-top: 10px;">
+                    <button type="button" class="background-capture" onclick="captureBackground()" style="background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 5px; margin-right: 10px;">Capture Background</button>
+                    <span id="background-status" style="color: #888;">Background not captured</span>
+                </div>
+                <div style="font-size: 23px; margin-top: 10px;">
+                    <span>Full camera photoelectron count: <span id="full_camera_counts" style="color: red"></span></span>
+                </div>
             </div>
             <script type="text/javascript" src="{{ url_for('static', filename='exptime.js') }}"></script>
         </div>
 
         <h2 style="font-size: 35px">Stream:</h2>
-        <div class="img-container" style="position: relative; display: inline-block;">
-            <img id="cameraStream" src="{{ url_for('video_feed') }}" alt="Streaming" width="auto" height="600" style="max-width: 1500px; cursor: crosshair;">
-            <canvas id="roiCanvas" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+        <div style="text-align: center; width: 100%;">
+            <div class="img-container" style="position: relative; display: inline-block; margin: 0 auto;">
+                <img id="cameraStream" src="{{ url_for('video_feed') }}" alt="Streaming" width="auto" height="600" style="max-width: 1500px; cursor: crosshair;">
+                <canvas id="roiCanvas" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+            </div>
             <p style="font-size: 25px"><a href="/stream">Click here to see in full screen</a></p>
         </div>
 
@@ -83,20 +99,15 @@
         </div>
 
         <div>
-            <span style="display: none;" class="rotationAngle">{{ data.angle }}</span>
-            <input type="button" value="Rotate image ({{ data.angle }})" id="rotateButton" onclick="rotate('.rotate')" />
             <button onclick="clearAllROI()">Clear All ROI</button>
-            <form action="/ROI" style="display: inline;">
-                <input type="submit" value="Legacy ROI Editor" />
-            </form>
         </div>
         <br>
         <div>
-            <form action="/hist">
-                <input type="submit" value="Tweak histogram" />
+            <form action="/photoelectron_graph">
+                <input type="submit" value="Photoelectrons Graph" />
             </form>
-            <form action="/cross_hair">
-                <input type="submit" value="Edit cross hairs" />
+            <form action="/hist">
+                <input type="submit" value="Histogram (Frequency vs Photoelectrons)" />
             </form>
         </div>
     <br>
@@ -239,7 +250,9 @@
                     <div id="stats-${roi.id}">
                         <div><strong>Bright ions:</strong> <span class="bright-${roi.id}">-</span></div>
                         <div><strong>Dim ions:</strong> <span class="dim-${roi.id}">-</span></div>
+                        <div><strong>Dark ions:</strong> <span class="dark-${roi.id}">-</span></div>
                         <div><strong>Max intensity:</strong> <span class="intensity-${roi.id}">-</span></div>
+                        <div><strong>Photoelectrons:</strong> <span class="photoelectrons-${roi.id}">-</span></div>
                     </div>
                     <button onclick="removeROI(${roi.id})" style="margin-top: 10px; background: #ff4444; color: white; border: none; padding: 5px 10px; border-radius: 3px;">Remove</button>
                 </div>
@@ -285,11 +298,74 @@
                     .then(data => {
                         document.querySelector(`.bright-${roiId}`).textContent = data.bright_ions || '-';
                         document.querySelector(`.dim-${roiId}`).textContent = data.dim_ions || '-';
+                        document.querySelector(`.dark-${roiId}`).textContent = data.dark_ions || '-';
                         document.querySelector(`.intensity-${roiId}`).textContent = data.max_intensity || '-';
+                        document.querySelector(`.photoelectrons-${roiId}`).textContent = data.photoelectron_count || '-';
                     })
                     .catch(error => console.log('Stats update failed for ROI', roiId));
             }, 1000); // Update every second
         }
+
+        function changeThreshold(selector) {
+            const newThreshold = document.querySelector('.intensityThreshold').value;
+
+            fetch('/set_ion_threshold', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            })
+            .then(response => {
+                const url = new URL('/set_ion_threshold', window.location.origin);
+                url.searchParams.append('threshold', newThreshold);
+                return fetch(url);
+            })
+            .then(response => response.text())
+            .then(data => {
+                console.log('Threshold updated to:', data);
+            })
+            .catch(error => {
+                console.error('Error updating threshold:', error);
+            });
+        }
+
+        // Update full camera photoelectron counts
+        function updateFullCameraStats() {
+            setInterval(() => {
+                fetch('/full_camera_stats')
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('full_camera_counts').textContent = data.photoelectron_count || '-';
+                    })
+                    .catch(error => console.log('Full camera stats update failed'));
+            }, 1000); // Update every second
+        }
+
+        function captureBackground() {
+            fetch('/capture_background', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('background-status').textContent = 'Background captured';
+                    document.getElementById('background-status').style.color = '#4CAF50';
+                } else {
+                    document.getElementById('background-status').textContent = 'Background capture failed';
+                    document.getElementById('background-status').style.color = '#f44336';
+                }
+            })
+            .catch(error => {
+                console.error('Error capturing background:', error);
+                document.getElementById('background-status').textContent = 'Background capture failed';
+                document.getElementById('background-status').style.color = '#f44336';
+            });
+        }
+
+        // Start updating full camera stats when page loads
+        window.addEventListener('load', function() {
+            updateFullCameraStats();
+        });
     </script>
     </body>
 </html>
