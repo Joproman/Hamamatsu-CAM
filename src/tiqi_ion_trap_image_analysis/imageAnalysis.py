@@ -425,4 +425,141 @@ def imageAnalysis(cam, settings):
         change_settings('RANGLE', RANGLE)
         return str(RANGLE)
 
+    # Multiple ROI management
+    roi_regions = {}
+
+    @app.route('/roi/<int:roi_id>/stream')
+    def roi_stream(roi_id):
+        """
+        Stream the cropped image for a specific ROI region
+        """
+        def gen_dynamic_roi():
+            while True:
+                if roi_id in roi_regions:
+                    region = roi_regions[roi_id]
+
+                    # Load image and coordinates
+                    acquire_semaphore_read(SEM)
+                    image = main.output['image'].copy()
+                    coord = main.output['coord'].copy()
+                    release_semaphore_read(SEM)
+
+                    image = set_min_max(image, HMIN, HMAX)
+                    image = plot_detection(image, coord.astype(int), list_cross_hairs)
+
+                    # Scale coordinates from display to actual image size
+                    scale_x = image.shape[1] / region['display_width']
+                    scale_y = image.shape[0] / region['display_height']
+
+                    x1 = int(region['x'] * scale_x)
+                    y1 = int(region['y'] * scale_y)
+                    x2 = int((region['x'] + region['width']) * scale_x)
+                    y2 = int((region['y'] + region['height']) * scale_y)
+
+                    # Ensure coordinates are within image bounds
+                    x1 = max(0, min(x1, image.shape[1]))
+                    y1 = max(0, min(y1, image.shape[0]))
+                    x2 = max(x1, min(x2, image.shape[1]))
+                    y2 = max(y1, min(y2, image.shape[0]))
+
+                    if x2 > x1 and y2 > y1:
+                        cropped_image = image[y1:y2, x1:x2]
+                        cropped_image = rotate(cropped_image, RANGLE)
+                        frame = cv2.imencode(".jpg", cropped_image)[1].tobytes()
+                    else:
+                        # Create a small placeholder image if ROI is invalid
+                        placeholder = np.zeros((50, 50, 3), dtype=np.uint8)
+                        frame = cv2.imencode(".jpg", placeholder)[1].tobytes()
+                else:
+                    # Create a small placeholder image if ROI doesn't exist
+                    placeholder = np.zeros((50, 50, 3), dtype=np.uint8)
+                    frame = cv2.imencode(".jpg", placeholder)[1].tobytes()
+
+                yield (b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                time.sleep(0.1)  # Small delay to prevent overwhelming
+
+        return Response(gen_dynamic_roi(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+    @app.route('/roi/<int:roi_id>/stats')
+    def roi_stats(roi_id):
+        """
+        Get statistics for a specific ROI region
+        """
+        if roi_id not in roi_regions:
+            return {'error': 'ROI not found'}
+
+        region = roi_regions[roi_id]
+
+        # Load image and coordinates
+        acquire_semaphore_read(SEM)
+        image = main.output['image'].copy()
+        coord = main.output['coord'].copy()
+        release_semaphore_read(SEM)
+
+        # Scale coordinates from display to actual image size
+        scale_x = image.shape[1] / region['display_width']
+        scale_y = image.shape[0] / region['display_height']
+
+        x1 = int(region['x'] * scale_x)
+        y1 = int(region['y'] * scale_y)
+        x2 = int((region['x'] + region['width']) * scale_x)
+        y2 = int((region['y'] + region['height']) * scale_y)
+
+        # Ensure coordinates are within image bounds
+        x1 = max(0, min(x1, image.shape[1]))
+        y1 = max(0, min(y1, image.shape[0]))
+        x2 = max(x1, min(x2, image.shape[1]))
+        y2 = max(y1, min(y2, image.shape[0]))
+
+        # Filter coordinates within this ROI
+        roi_coords = []
+        for c in coord:
+            if x1 <= c[0] <= x2 and y1 <= c[1] <= y2:
+                roi_coords.append(c)
+
+        # Count ions by intensity (this is a simplified version)
+        roi_coords = np.array(roi_coords) if roi_coords else np.array([])
+        bright_ions = len(roi_coords)  # Simplified - all detected ions are counted as bright
+
+        # Get max intensity in ROI
+        if x2 > x1 and y2 > y1:
+            roi_image = image[y1:y2, x1:x2]
+            max_intensity = int(np.max(roi_image)) if roi_image.size > 0 else 0
+        else:
+            max_intensity = 0
+
+        return {
+            'bright_ions': bright_ions,
+            'dim_ions': 0,  # Simplified for now
+            'max_intensity': max_intensity,
+            'coordinates': roi_coords.tolist() if len(roi_coords) > 0 else []
+        }
+
+    @app.route('/roi/register', methods=['POST'])
+    def register_roi():
+        """
+        Register a new ROI region
+        """
+        data = request.json
+        roi_id = data['id']
+        roi_regions[roi_id] = {
+            'x': data['x'],
+            'y': data['y'],
+            'width': data['width'],
+            'height': data['height'],
+            'display_width': data['display_width'],
+            'display_height': data['display_height']
+        }
+        return {'success': True}
+
+    @app.route('/roi/<int:roi_id>/delete', methods=['POST'])
+    def delete_roi(roi_id):
+        """
+        Delete an ROI region
+        """
+        if roi_id in roi_regions:
+            del roi_regions[roi_id]
+        return {'success': True}
+
     app.run(debug=False, host="0.0.0.0", port=5000)

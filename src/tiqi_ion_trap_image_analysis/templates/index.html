@@ -72,15 +72,22 @@
         </div>
 
         <h2 style="font-size: 35px">Stream:</h2>
-        <span class="img-container">
-            <img src="{{ url_for('video_feed_roi') }}" alt="Streaming" width="auto" height="350" style="max-width: 1500px">
+        <div class="img-container" style="position: relative; display: inline-block;">
+            <img id="cameraStream" src="{{ url_for('video_feed') }}" alt="Streaming" width="auto" height="600" style="max-width: 1500px; cursor: crosshair;">
+            <canvas id="roiCanvas" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
             <p style="font-size: 25px"><a href="/stream">Click here to see in full screen</a></p>
-        </span>
+        </div>
+
+        <h3 style="font-size: 25px">ROI Regions:</h3>
+        <div id="roiContainer" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin: 20px 0;">
+        </div>
+
         <div>
             <span style="display: none;" class="rotationAngle">{{ data.angle }}</span>
             <input type="button" value="Rotate image ({{ data.angle }})" id="rotateButton" onclick="rotate('.rotate')" />
-            <form action="/ROI">
-                <input type="submit" value="Change ROI" />
+            <button onclick="clearAllROI()">Clear All ROI</button>
+            <form action="/ROI" style="display: inline;">
+                <input type="submit" value="Legacy ROI Editor" />
             </form>
         </div>
         <br>
@@ -93,5 +100,196 @@
             </form>
         </div>
     <br>
+
+    <script>
+        let roiRectangles = [];
+        let isDrawing = false;
+        let startX, startY, currentROI = null;
+        let canvas, ctx, img;
+        let roiCounter = 1;
+
+        window.onload = function() {
+            canvas = document.getElementById('roiCanvas');
+            ctx = canvas.getContext('2d');
+            img = document.getElementById('cameraStream');
+
+            // Set canvas size to match image
+            function resizeCanvas() {
+                canvas.width = img.offsetWidth;
+                canvas.height = img.offsetHeight;
+                redrawROIs();
+            }
+
+            img.onload = resizeCanvas;
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+
+            // Mouse events for drawing ROI
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', drawROI);
+            canvas.addEventListener('mouseup', endDrawing);
+            canvas.style.pointerEvents = 'auto';
+        };
+
+        function startDrawing(e) {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+        }
+
+        function drawROI(e) {
+            if (!isDrawing) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+
+            redrawROIs();
+
+            // Draw current rectangle being drawn
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+        }
+
+        function endDrawing(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+
+            // Only create ROI if rectangle has meaningful size
+            if (Math.abs(endX - startX) > 10 && Math.abs(endY - startY) > 10) {
+                const roi = {
+                    id: roiCounter++,
+                    x: Math.min(startX, endX),
+                    y: Math.min(startY, endY),
+                    width: Math.abs(endX - startX),
+                    height: Math.abs(endY - startY),
+                    color: getRandomColor()
+                };
+
+                // Register ROI with backend
+                fetch('/roi/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: roi.id,
+                        x: roi.x,
+                        y: roi.y,
+                        width: roi.width,
+                        height: roi.height,
+                        display_width: canvas.width,
+                        display_height: canvas.height
+                    })
+                }).then(response => response.json())
+                  .then(data => {
+                      if (data.success) {
+                          roiRectangles.push(roi);
+                          createROIDisplay(roi);
+                          redrawROIs();
+                      }
+                  })
+                  .catch(error => console.error('Error registering ROI:', error));
+            }
+        }
+
+        function redrawROIs() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            roiRectangles.forEach(roi => {
+                ctx.strokeStyle = roi.color;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([]);
+                ctx.strokeRect(roi.x, roi.y, roi.width, roi.height);
+
+                // Add ROI label
+                ctx.fillStyle = roi.color;
+                ctx.font = '14px Arial';
+                ctx.fillText(`ROI ${roi.id}`, roi.x + 5, roi.y - 5);
+            });
+        }
+
+        function createROIDisplay(roi) {
+            const roiContainer = document.getElementById('roiContainer');
+
+            const roiDiv = document.createElement('div');
+            roiDiv.id = `roi-${roi.id}`;
+            roiDiv.style.cssText = `
+                border: 2px solid ${roi.color};
+                border-radius: 8px;
+                padding: 10px;
+                background: #f9f9f9;
+                text-align: center;
+                min-width: 200px;
+            `;
+
+            roiDiv.innerHTML = `
+                <h4>ROI ${roi.id}</h4>
+                <img src="/roi/${roi.id}/stream" alt="ROI ${roi.id}" style="width: 150px; height: 150px; object-fit: cover; border: 1px solid #ccc;">
+                <div style="margin-top: 10px;">
+                    <div><strong>Position:</strong> (${Math.round(roi.x)}, ${Math.round(roi.y)})</div>
+                    <div><strong>Size:</strong> ${Math.round(roi.width)} × ${Math.round(roi.height)}</div>
+                    <div id="stats-${roi.id}">
+                        <div><strong>Bright ions:</strong> <span class="bright-${roi.id}">-</span></div>
+                        <div><strong>Dim ions:</strong> <span class="dim-${roi.id}">-</span></div>
+                        <div><strong>Max intensity:</strong> <span class="intensity-${roi.id}">-</span></div>
+                    </div>
+                    <button onclick="removeROI(${roi.id})" style="margin-top: 10px; background: #ff4444; color: white; border: none; padding: 5px 10px; border-radius: 3px;">Remove</button>
+                </div>
+            `;
+
+            roiContainer.appendChild(roiDiv);
+
+            // Start fetching stats for this ROI
+            updateROIStats(roi.id);
+        }
+
+        function removeROI(roiId) {
+            // Delete from backend
+            fetch(`/roi/${roiId}/delete`, {
+                method: 'POST'
+            }).then(response => response.json())
+              .then(data => {
+                  if (data.success) {
+                      roiRectangles = roiRectangles.filter(roi => roi.id !== roiId);
+                      document.getElementById(`roi-${roiId}`).remove();
+                      redrawROIs();
+                  }
+              })
+              .catch(error => console.error('Error deleting ROI:', error));
+        }
+
+        function clearAllROI() {
+            roiRectangles = [];
+            document.getElementById('roiContainer').innerHTML = '';
+            redrawROIs();
+        }
+
+        function getRandomColor() {
+            const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ff8000', '#8000ff'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function updateROIStats(roiId) {
+            // This function will be called periodically to update ROI statistics
+            setInterval(() => {
+                fetch(`/roi/${roiId}/stats`)
+                    .then(response => response.json())
+                    .then(data => {
+                        document.querySelector(`.bright-${roiId}`).textContent = data.bright_ions || '-';
+                        document.querySelector(`.dim-${roiId}`).textContent = data.dim_ions || '-';
+                        document.querySelector(`.intensity-${roiId}`).textContent = data.max_intensity || '-';
+                    })
+                    .catch(error => console.log('Stats update failed for ROI', roiId));
+            }, 1000); // Update every second
+        }
+    </script>
     </body>
 </html>
